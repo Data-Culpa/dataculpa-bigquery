@@ -319,7 +319,7 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
 
     print("META = ", meta)
 
-    sql = "select * from `%s` " % (table,)
+    sql = "select * from %s " % (table,)
 
     # check our history.
     gCache.load()
@@ -384,19 +384,17 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
         for i in range(0, len(row)):
             df_entry[field_names[i]] = row[i]
 
-            # FIXME: need to add some checking.
-            #if field_names[i] == t_order_by:
-            #
-            #    this_timeshift = rr[i]
+        if field_names[i] == t_order_by:
+            this_timeshift = row[i]
         # endif
 
         if this_timeshift is not None:
-            dt_now = datetime.now(timezone.utc)
+            dt_now = datetime.now() #timezone.utc)
             dt_delta = dt_now - this_timeshift
             dt_delta_ts = dt_delta.total_seconds()
             if (abs(dt_delta_ts - last_timeshift) > 86400):
                 last_timeshift = dt_delta_ts
-                print("this_timeshift = ", dt_delta_ts)
+                #print("this_timeshift = ", dt_delta_ts)
 
                 meta['record_count'] = timeshift_r_count
                 timeshift_r_count = 0
@@ -413,7 +411,7 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
 
         if dc is None:
             dc = config.connect_controller(t_nickname, timeshift=0)
-        #print(df_entry)
+        
         dc.queue_record(df_entry)
         cache_marker = this_timeshift
 
@@ -428,7 +426,7 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
     if total_r_count > 0:
         if cache_marker is None:
             if t_order_by is not None:
-                logger.error("ERROR: we specified an order by constraint for caching that is missing from the table schema.")
+                logger.error("ERROR: we specified an order by constraint __%s__ for caching that is missing from the table schema." % t_order_by)
                 sys.exit(2)
         else:
             # OK, save it off...
@@ -440,8 +438,6 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
     if DC_DEBUG:
         logger.info("total_r_count = %s", total_r_count)
 
-    cs.close()
-
     meta['record_count'] = timeshift_r_count
     if dc is not None:
         dc.queue_metadata(meta)
@@ -452,7 +448,6 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
         if total_r_count != 0:
             logger.error("Never setup a connection to DC; total record count = %s", total_r_count)
     # FIXME: On error, rollback the cache
-    print("-------")
     return
 
 def do_init(filename):
