@@ -367,9 +367,8 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
 
     # we want to set a timeshift.
     last_timeshift = 0
-    dc = None # Delay opening the connection til we are ready. config.connect_controller(table, timeshift=0)
+    dc = None # Delay opening the connection til we are ready.
 
-#    for rr in r:
     for row in job:
         total_r_count += 1
         timeshift_r_count += 1
@@ -389,8 +388,12 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
         # endif
 
         if this_timeshift is not None:
-            dt_now = datetime.now() #timezone.utc)
-            dt_delta = dt_now - this_timeshift
+            dt_now = datetime.now(timezone.utc)
+            try:
+                dt_delta = dt_now - this_timeshift
+            except:
+                dt_delta = datetime.now() - this_timeshift # no timezone.
+
             dt_delta_ts = dt_delta.total_seconds()
             if (abs(dt_delta_ts - last_timeshift) > 86400):
                 last_timeshift = dt_delta_ts
