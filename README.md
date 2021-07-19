@@ -9,7 +9,7 @@ Google BigQuery connector for Data Culpa - monitor data quality in Google BigQue
 ```
 pip install google-cloud-bigquery google-cloud-bigquery-storage dataculpa-client
 ```
-3. Create a BigQuery service account and access key; the connector will checkGOOGLE_APPLICATION_CREDENTIALS for the path to the access key JSON file. The BigQuery user will need the usual permissions to read from your desired data sets. 
+3. Create a BigQuery service account and access key; the connector will check the usual GOOGLE_APPLICATION_CREDENTIALS environment variable for the path to the access key JSON file. The BigQuery user will need the usual permissions to read from your desired data sets. 
 
 
 ## Configure
