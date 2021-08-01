@@ -383,9 +383,9 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
         for i in range(0, len(row)):
             df_entry[field_names[i]] = row[i]
 
-        if field_names[i] == t_order_by:
-            this_timeshift = row[i]
-        # endif
+            if field_names[i] == t_order_by:
+                this_timeshift = row[i]
+            # endif
 
         if this_timeshift is not None:
             dt_now = datetime.now(timezone.utc)
@@ -429,7 +429,7 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
     if total_r_count > 0:
         if cache_marker is None:
             if t_order_by is not None:
-                logger.error("ERROR: we specified an order by constraint __%s__ for caching that is missing from the table schema." % t_order_by)
+                logger.error("ERROR: we specified an ORDER BY constraint __%s__ for caching that is missing from the table schema: __%s__" % (t_order_by, field_names))
                 sys.exit(2)
         else:
             # OK, save it off...
