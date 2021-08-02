@@ -387,6 +387,38 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit, t_use_tim
     cache_marker = None
 
     total_r_count = 0
+
+    if not t_use_timeshift:
+        dc = config.connect_controller(t_nickname, timeshift=None)
+        dc.queue_metadata(meta)
+
+        for row in job:
+            total_r_count += 1
+            df_entry = {}
+
+            if len(field_names) == 0:
+                field_names = list(row.keys())
+                # assuming BQ provides a uniform table?
+            # endif
+            
+            for i in range(0, len(row)):
+                df_entry[field_names[i]] = row[i]
+
+            dc.queue_record(df_entry)
+        # endfor
+        
+        (_queue_id, _result) = dc.queue_commit()
+        if _result.get('had_error', True):
+            logger.warning("Error: %s", _result)
+        
+        if True: #DC_DEBUG:
+            logger.info("total_r_count = %s", total_r_count)
+        return
+    # endif
+
+    # 
+    # Timeshift operation
+    #
     timeshift_r_count = 0
 
     # we want to set a timeshift.
