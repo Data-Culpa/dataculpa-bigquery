@@ -38,11 +38,14 @@ import yaml
 
 import dotenv
 
+from dateutil import parser
 from datetime import datetime, timedelta, timezone
 
 from dataculpa import DataCulpaValidator
 from google.cloud import bigquery
 from google.cloud.bigquery import dbapi
+
+DC_DEBUG = os.environ.get('DC_DEBUG', False)
 
 if False:
     for k,v in  logging.Logger.manager.loggerDict.items():
@@ -264,22 +267,11 @@ class SessionHistory:
 
 gCache = SessionHistory()
 
-def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
-    logger.info("fetching ... %s (aka %s)", table, t_nickname)
-
-    bq_client = bigquery.Client()
-    #conn = dbapi.Connection(bq_client)
-    #cs = conn.cursor()
-
-    meta = {}
-
-    field_types = {}
-    field_names = []
-
-    # build select.
-    # ok we need to see if we have fetched this table before..
-
+def getMeta(bq_client, table, t_order_by):
     # build up min/maxes in case it's useful for debugging.
+    # FIXME: if we have to translate types for this later, this might not be particularly useful.
+    meta = {}
+    
     if t_order_by is not None:
         global_min_sql = "select min(%s) from %s"  % (t_order_by, table)
         global_max_sql = "select max(%s) from %s"  % (t_order_by, table)
@@ -289,25 +281,13 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
         job = bq_client.query(global_min_sql)
         for row in job:
             min_r = row[0]
-        #cs.execute(global_min_sql)
-        #min_r = cs.fetchone()
-        #if min_r is not None:
-        #    min_r = min_r[0]
 
         gCache.append_sql_log(table, global_max_sql)
-        #cs.execute(global_max_sql)
-        #max_r = cs.fetchone()
-        #if max_r is not None:
-        #    max_r = max_r[0]
         job = bq_client.query(global_max_sql)
         for row in job:
             max_r = row[0]
 
         gCache.append_sql_log(table, global_count)
-        #cs.execute(global_count)
-        #count_r = cs.fetchone()
-        #if count_r is not None:
-        #    count_r = count_r[0]
         job = bq_client.query(global_count)
         for row in job:
             count_r = row[0]
@@ -317,33 +297,79 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
         meta['count_%s' % table] = count_r
     # endif
 
-    print("META = ", meta)
+    return meta
 
-    sql = "select * from %s " % (table,)
+def buildSqlSuffix(table, t_use_timeshift, t_order_by, t_initial_limit):
+    gCache.load()
+    
+    ORDER_BY = "order_by"
+    LIMIT = "limit"
+    WHERE = "where"
+
+    parts = {}
+
+    if t_order_by is not None:
+        parts[ORDER_BY] = "ORDER BY %s DESC" % t_order_by
+
+    do_limit = False
+    if t_initial_limit is not None:
+        if t_use_timeshift:
+            # When we use timeshift, only limit the initial load when we have no cache market
+            if not gCache.has_history(table):
+                do_limit = True
+        else:
+            do_limit = True
+        # endif
+    # endif
+
+    if do_limit:
+        parts[LIMIT] = "LIMIT %s" % t_initial_limit
 
     # check our history.
-    gCache.load()
+    if not t_use_timeshift:
+        logger.info("Timeshift is disabled; loading everything")
 
-    marker_pair = gCache.get_history(table)
-    if marker_pair is not None:
-        (fk, fv) = marker_pair
-        sql += " WHERE %s > '%s'" % (fk, fv)
-    if t_order_by is not None:
-        sql += " ORDER BY %s DESC" % t_order_by
-    if t_initial_limit is not None:
-        # we want to do this only if we don't have a cached object for this table.
-        if not gCache.has_history(table):
-            sql += " LIMIT %s" % t_initial_limit
-            did_sql_limit = True
-
-    DC_DEBUG = os.environ.get('DC_DEBUG', False)
-    if DC_DEBUG and not did_sql_limit:
-        logger.warning("DC_DEBUG is set")
-        did_log_sf_debug = True
-
-        sql += " LIMIT 100"
-        did_sql_limit = True
+    if t_use_timeshift:
+        marker_pair = gCache.get_history(table)
+        if marker_pair is not None:
+            (fk, fv) = marker_pair
+            parts[WHERE] = "WHERE %s > '%s'" % (fk, fv)
+        # else... hopefully it's a new load.
+        # endif
     # endif
+    
+    if DC_DEBUG:
+        logger.warning("DC_DEBUG is set")
+        if not do_limit:
+            parts[LIMIT] = "LIMIT 100"
+            do_limit = True
+    # endif
+
+    suffix = "%s %s %s" % (parts.get(WHERE, ""), parts.get(ORDER_BY, ""), parts.get(LIMIT))
+    return suffix
+
+def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit, t_use_timeshift):
+    logger.info("fetching ... %s (aka %s)", table, t_nickname)
+
+    did_log_debug = False
+
+    bq_client = bigquery.Client()
+
+    field_types = {}
+    field_names = []
+
+    # build select.
+    # ok we need to see if we have fetched this table before..
+
+    meta = getMeta(bq_client, table, t_order_by)
+    logger.info("META = %s", meta)
+
+    sql_prefix = "select * from %s " % (table,)
+    sql_suffix = buildSqlSuffix(table, t_use_timeshift, t_order_by, t_initial_limit)
+    
+    sql = sql_prefix + sql_suffix
+    
+    logger.info("Running __%s__" % sql)
 
     ts = time.time()
 
@@ -351,7 +377,6 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
     gCache.append_sql_log(table, sql)
     gCache.save()
 
-    #cs.execute(sql)
     job = bq_client.query(sql)
 
     dt = time.time() - ts
@@ -360,7 +385,6 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
     meta['sql_processing_time'] = dt        # potentially useless.
 
     cache_marker = None
-#    r = cs.fetchall()       # FIXME: not what we want for big jobs.
 
     total_r_count = 0
     timeshift_r_count = 0
@@ -388,6 +412,12 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
             # endif
 
         if this_timeshift is not None:
+            if isinstance(this_timeshift, str):
+                try:
+                    this_timeshift = parser.parse(this_timeshift)
+                except:
+                    logger.exception("Error parsing __%s__" % this_timeshift)
+
             dt_now = datetime.now(timezone.utc)
             try:
                 dt_delta = dt_now - this_timeshift
@@ -421,9 +451,9 @@ def FetchTable(table, t_nickname, config, t_order_by, t_initial_limit):
         # just for debugging
         if DC_DEBUG:
             if total_r_count > 100:
-                if not did_log_sf_debug:
+                if not did_log_debug:
                     logger.warning("DC_DEBUG is set; stopping at 100 rows")
-                    did_log_sf_debug = True
+                    did_log_debug = True
                 break
 
     if total_r_count > 0:
@@ -508,22 +538,26 @@ def do_run(filename, table_name=None, nocache_mode=False):
         t_name          = t.get('table')
         t_order_by      = t.get('desc_order_by')
         t_initial_limit = t.get('initial_limit')
-        t_timeshift     = t.get('timeshift', False) # True/False
+        t_use_timeshift = t.get('timeshift', False) # True/False
         t_nickname      = t.get('dc-nickname', t_name)
 
-        if t_timeshift != True:
-            t_timeshift = False
+        if t_use_timeshift != True:
+            t_use_timeshift = False
+            logger.info("Weird format for timeshift found; setting to %s", t_use_timeshift)
+        # endif
 
-        # little safeguard while we test
+        # a little safeguard while we test
         if t_initial_limit is None:
             t_initial_limit = 1000
+            logger.info("No initial_limit found; setting to %s", t_initial_limit)
+        # endif
 
         if table_name is not None:
             if t_name.lower() == table_name.lower():
-                FetchTable(t_name, t_nickname, config, t_order_by, t_initial_limit)
+                FetchTable(t_name, t_nickname, config, t_order_by, t_initial_limit, t_use_timeshift)
         else:
             # normal operation
-            FetchTable(t_name, t_nickname, config, t_order_by, t_initial_limit)
+            FetchTable(t_name, t_nickname, config, t_order_by, t_initial_limit, t_use_timeshift)
         # endif
     # endfor
 
