@@ -7,7 +7,7 @@ Google BigQuery connector for Data Culpa - monitor data quality in Google BigQue
 1. Clone the repo (or just ```dc-bigquery.py```)
 2. Install python dependencies (python3):
 ```
-pip install google-cloud-bigquery google-cloud-bigquery-storage dataculpa-client
+pip install google-cloud-bigquery google-cloud-bigquery-storage python-dotenv dataculpa-client
 ```
 3. Create a BigQuery service account and access key; the connector will check the usual GOOGLE_APPLICATION_CREDENTIALS environment variable for the path to the access key JSON file. The BigQuery user will need the usual permissions to read from your desired data sets. 
 
