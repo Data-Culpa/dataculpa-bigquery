@@ -582,6 +582,9 @@ def do_run(filename, table_name=None, nocache_mode=False):
         if t_initial_limit is None:
             t_initial_limit = 1000
             logger.info("No initial_limit found; setting to %s", t_initial_limit)
+        elif t_initial_limit == 0:
+            logger.info("initial limit is set to 0 -- unlimited.")
+            t_initial_limit = None
         # endif
 
         if table_name is not None:
